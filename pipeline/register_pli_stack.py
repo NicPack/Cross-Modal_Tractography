@@ -86,7 +86,7 @@ def downscale(arr: np.ndarray, scale: float) -> np.ndarray:
     return rescale(arr, scale, anti_aliasing=True, order=1).astype(np.float32)
 
 
-def to_ants(arr: np.ndarray, spacing_mm: float) -> ants.ANTsImage:
+def to_ants(arr: np.ndarray, spacing_mm: float) -> ants.ants_image:
     img = ants.from_numpy(arr.copy())
     img.set_spacing([spacing_mm, spacing_mm])
     return img

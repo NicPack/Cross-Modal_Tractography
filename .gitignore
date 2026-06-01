@@ -1,0 +1,26 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.python-version
+
+# --- Caches / OS ---
+.pytest_cache/
+.DS_Store
+
+# --- Large data artifacts (kept locally only) ---
+data/
+*.nii
+*.nii.gz
+*.trk
+*.tif
+*.tiff
+*.npz
+
+# --- Training runs / checkpoints ---
+cross_modal_vae/runs/
+*.pt
+
+# --- Vendored binary (DSI Studio) ---
+dsi_studio.app/
