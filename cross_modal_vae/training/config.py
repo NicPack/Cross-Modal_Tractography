@@ -32,6 +32,9 @@ class TrainConfig:
     beta_ramp_epochs: int = 50
     lambda_cross: float = 1.0
     lambda_align: float = 0.1
+    # Per-dim KL floor (nats) to prevent posterior collapse. 0.0 = off (the
+    # brief's behaviour); set via --free-bits at the CLI for experiments.
+    free_bits: float = 0.0
 
     # Misc
     seed: int = 0

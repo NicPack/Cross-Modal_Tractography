@@ -28,6 +28,7 @@ class LossWeights:
     beta: float = 1.0
     lambda_cross: float = 1.0
     lambda_align: float = 0.1
+    free_bits: float = 0.0
 
 
 def compute_losses(
@@ -40,7 +41,14 @@ def compute_losses(
     recon_pli, mu_pli, log_sigma_pli = vae.forward_pli(pli)
 
     recon = chamfer_distance(mri, recon_mri) + chamfer_distance(pli, recon_pli)
-    kl = kl_to_standard_normal(mu_mri, log_sigma_mri) + kl_to_standard_normal(
+
+    # `kl` is the penalised quantity that enters `total` (per-dim floored by
+    # free_bits); `kl_raw` is the true, unfloored KL kept only for logging, so
+    # we can still see posterior collapse coming. With free_bits=0.0 they match.
+    kl = kl_to_standard_normal(
+        mu_mri, log_sigma_mri, weights.free_bits
+    ) + kl_to_standard_normal(mu_pli, log_sigma_pli, weights.free_bits)
+    kl_raw = kl_to_standard_normal(mu_mri, log_sigma_mri) + kl_to_standard_normal(
         mu_pli, log_sigma_pli
     )
 
@@ -63,6 +71,7 @@ def compute_losses(
         "total": total,
         "recon": recon,
         "kl": kl,
+        "kl_raw": kl_raw,
         "cross": cross,
         "align": align,
     }

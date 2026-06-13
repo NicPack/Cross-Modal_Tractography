@@ -35,15 +35,35 @@ def resample_streamline(streamline: np.ndarray, n_points: int) -> np.ndarray:
 def trk_to_npz(
     trk_path: Path | str, out_path: Path | str, n_points: int = 256
 ) -> np.ndarray:
-    """Load .trk (RASMM), resample each streamline, save (N, n_points, 3) .npz."""
+    """Load .trk (RASMM), resample each streamline, save (N, n_points, 3) .npz.
+
+    Degenerate streamlines (fewer than 2 points) are silently skipped — DSI Studio
+    and the PLI tracker can emit single-point "streamlines" when a seed terminates
+    immediately. The skip count is printed so the drop is visible.
+    """
     tractogram_file = nib.streamlines.load(str(trk_path))
     streamlines = tractogram_file.streamlines
-    resampled = np.stack(
-        [resample_streamline(np.asarray(s, dtype=np.float32), n_points) for s in streamlines],
-        axis=0,
-    ).astype(np.float32)
+
+    resampled_list = []
+    skipped = 0
+    for s in streamlines:
+        arr = np.asarray(s, dtype=np.float32)
+        if arr.ndim != 2 or arr.shape[0] < 2 or arr.shape[1] != 3:
+            skipped += 1
+            continue
+        resampled_list.append(resample_streamline(arr, n_points))
+
+    if not resampled_list:
+        raise ValueError(
+            f"{trk_path}: no usable streamlines (skipped {skipped} degenerate)"
+        )
+    if skipped:
+        print(f"  skipped {skipped} degenerate streamline(s) (< 2 points)")
+
+    resampled = np.stack(resampled_list, axis=0).astype(np.float32)
     np.savez(str(out_path), resampled)
     return resampled
+
 
 
 def main() -> None:

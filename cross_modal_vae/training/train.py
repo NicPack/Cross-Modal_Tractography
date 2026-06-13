@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import time
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +20,20 @@ from cross_modal_vae.models.vae import CrossModalVAE
 from .config import TrainConfig
 from .losses import LossWeights, compute_losses
 from .train_step import save_checkpoint
+
+
+# How often (in epochs) to flush a checkpoint + history to disk during a long
+# run, so a Slurm time-limit kill leaves a usable model behind instead of
+# discarding everything. final.pt is also written once at the very end.
+_CHECKPOINT_EVERY = 5
+
+
+def _fmt_hms(seconds: float) -> str:
+    """Seconds -> 'H:MM:SS' for human-readable elapsed/ETA logging."""
+    s = int(seconds)
+    h, rem = divmod(s, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}"
 
 
 def _seed_everything(seed: int) -> None:
@@ -71,7 +86,14 @@ def train_from_arrays(
     optimizer = torch.optim.Adam(vae.parameters(), lr=cfg.lr)
 
     history: list[dict[str, float]] = []
+    t_start = time.time()
+    print(
+        f"[train] starting {cfg.epochs} epochs on {device} | "
+        f"{cfg.bundles_per_epoch} bundles/epoch, batch {cfg.batch_size}",
+        flush=True,
+    )
     for epoch in range(cfg.epochs):
+        t_epoch = time.time()
         dataset = PairedBundleDataset(
             mri=mri_n, pli=pli_n, K=cfg.K,
             bundles_per_epoch=cfg.bundles_per_epoch,
@@ -87,9 +109,12 @@ def train_from_arrays(
             beta=beta,
             lambda_cross=cfg.lambda_cross,
             lambda_align=cfg.lambda_align,
+            free_bits=cfg.free_bits,
         )
 
-        epoch_sums = {k: 0.0 for k in ("total", "recon", "kl", "cross", "align")}
+        epoch_sums = {
+            k: 0.0 for k in ("total", "recon", "kl", "kl_raw", "cross", "align")
+        }
         n_batches = 0
         vae.train()
         for mri_batch, pli_batch in _bundle_batches(dataset, cfg.batch_size, device):
@@ -105,7 +130,29 @@ def train_from_arrays(
         for k, v in epoch_sums.items():
             log[k] = v / max(n_batches, 1)
         history.append(log)
-        print(json.dumps(log))
+
+        # Live, flushed progress with throughput + ETA. stdout is block-buffered
+        # under Slurm, so flush=True is what makes epochs visible in slurm-*.out.
+        done = epoch + 1
+        elapsed = time.time() - t_start
+        eta = (elapsed / done) * (cfg.epochs - done)
+        print(
+            f"[epoch {done}/{cfg.epochs}] "
+            f"total={log['total']:.4f} recon={log['recon']:.4f} "
+            f"kl={log['kl']:.4f} kl_raw={log['kl_raw']:.4f} "
+            f"cross={log['cross']:.4f} "
+            f"align={log['align']:.4f} beta={beta:.3f} | "
+            f"{time.time() - t_epoch:.1f}s/epoch | "
+            f"elapsed {_fmt_hms(elapsed)} | ETA {_fmt_hms(eta)}",
+            flush=True,
+        )
+
+        # Periodically persist so a time-limit kill keeps the latest model and
+        # the full history-so-far rather than losing the entire run.
+        if done % _CHECKPOINT_EVERY == 0 or done == cfg.epochs:
+            save_checkpoint(vae, out_dir / "latest.pt")
+            with (out_dir / "history.json").open("w") as f:
+                json.dump(history, f, indent=2)
 
     save_checkpoint(vae, out_dir / "final.pt")
     with (out_dir / "history.json").open("w") as f:
@@ -133,6 +180,12 @@ def main() -> None:
     parser.add_argument("--beta-target", type=float, default=1.0)
     parser.add_argument("--lambda-cross", type=float, default=1.0)
     parser.add_argument("--lambda-align", type=float, default=0.1)
+    parser.add_argument(
+        "--free-bits",
+        type=float,
+        default=0.0,
+        help="per-dim KL floor (nats) to prevent posterior collapse; 0 = off",
+    )
     args = parser.parse_args()
 
     cfg = TrainConfig(
@@ -149,6 +202,7 @@ def main() -> None:
         beta_target=args.beta_target,
         lambda_cross=args.lambda_cross,
         lambda_align=args.lambda_align,
+        free_bits=args.free_bits,
         seed=args.seed,
         device=args.device,
         out_dir=args.out_dir,

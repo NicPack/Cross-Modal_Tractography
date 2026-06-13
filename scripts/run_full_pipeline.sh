@@ -25,6 +25,10 @@
 
 set -euo pipefail
 
+MRI_TRK="data/processed/dti_MRI_streamlines_Sample1.trk"
+PLI_TRK="data/processed/microscopy_tractography.trk"
+OUT_DIR="runs/exp1"
+
 : "${MRI_TRK:?MRI_TRK is required}"
 : "${PLI_TRK:?PLI_TRK is required}"
 : "${OUT_DIR:?OUT_DIR is required}"
